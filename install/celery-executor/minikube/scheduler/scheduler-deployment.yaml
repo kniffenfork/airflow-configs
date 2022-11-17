@@ -1,0 +1,290 @@
+################################
+## Airflow Scheduler Deployment/StatefulSet
+#################################
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: airflow-scheduler
+  labels:
+    tier: airflow
+    component: scheduler
+    release: airflow
+    executor: CeleryExecutor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      tier: airflow
+      component: scheduler
+      release: airflow
+  template:
+    metadata:
+      labels:
+        tier: airflow
+        component: scheduler
+        release: airflow
+      annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
+    spec:
+      nodeSelector:
+        {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  component: scheduler
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      tolerations:
+        []
+      topologySpreadConstraints:
+        []
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 10
+      serviceAccountName: airflow-scheduler
+      securityContext: 
+        runAsUser: 50000
+        fsGroup: 0
+      initContainers:
+        - name: wait-for-airflow-migrations
+          resources:
+            {}
+          image: apache/airflow:2.3.3
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: config
+              mountPath: "/opt/airflow/airflow.cfg"
+              subPath: airflow.cfg
+              readOnly: true
+          args:          
+            - airflow
+            - db
+            - check-migrations
+            - --migration-wait-timeout=60
+          envFrom:          
+            []
+          env:          
+            # Dynamically created environment variables
+            # Dynamically created secret envs
+            # Extra env          
+            # Hard Coded Airflow Envs
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-fernet-key
+                  key: fernet-key
+            # For Airflow <2.3, backward compatibility; moved to [database] in 2.3
+            - name: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-metadata
+                  key: connection
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-metadata
+                  key: connection
+            - name: AIRFLOW_CONN_AIRFLOW_DB
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-metadata
+                  key: connection
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-webserver-secret-key
+                  key: webserver-secret-key
+            # (Airflow 1.10.* variant)
+            - name: AIRFLOW__CELERY__CELERY_RESULT_BACKEND
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-result-backend
+                  key: connection
+            - name: AIRFLOW__CELERY__RESULT_BACKEND
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-result-backend
+                  key: connection
+            - name: AIRFLOW__CELERY__BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-broker-url
+                  key: connection
+        
+        - name: git-sync-init
+          image: k8s.gcr.io/git-sync/git-sync:v3.4.0
+          imagePullPolicy: IfNotPresent
+          securityContext: 
+            runAsUser: 65533
+          env:
+            - name: GIT_SYNC_REV
+              value: "HEAD"
+            - name: GIT_SYNC_BRANCH
+              value: "v2-2-stable"
+            - name: GIT_SYNC_REPO
+              value: "https://github.com/apache/airflow.git"
+            - name: GIT_SYNC_DEPTH
+              value: "1"
+            - name: GIT_SYNC_ROOT
+              value: "/git"
+            - name: GIT_SYNC_DEST
+              value: "repo"
+            - name: GIT_SYNC_ADD_USER
+              value: "true"
+            - name: GIT_SYNC_WAIT
+              value: "60"
+            - name: GIT_SYNC_MAX_SYNC_FAILURES
+              value: "0"
+            - name: GIT_SYNC_ONE_TIME
+              value: "true"
+          resources: 
+              {}
+          volumeMounts:
+          - name: dags
+            mountPath: /git
+      containers:
+        # Always run the main scheduler container.
+        - name: scheduler
+          image: apache/airflow:2.3.3
+          imagePullPolicy: IfNotPresent
+          args: 
+            - bash
+            - -c
+            - exec airflow scheduler
+          envFrom:          
+            []
+          env:          
+            # Dynamically created environment variables
+            # Dynamically created secret envs
+            # Extra env          
+            # Hard Coded Airflow Envs
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-fernet-key
+                  key: fernet-key
+            # For Airflow <2.3, backward compatibility; moved to [database] in 2.3
+            - name: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-metadata
+                  key: connection
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-metadata
+                  key: connection
+            - name: AIRFLOW_CONN_AIRFLOW_DB
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-metadata
+                  key: connection
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-webserver-secret-key
+                  key: webserver-secret-key
+            # (Airflow 1.10.* variant)
+            - name: AIRFLOW__CELERY__CELERY_RESULT_BACKEND
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-result-backend
+                  key: connection
+            - name: AIRFLOW__CELERY__RESULT_BACKEND
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-result-backend
+                  key: connection
+            - name: AIRFLOW__CELERY__BROKER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-broker-url
+                  key: connection          
+          livenessProbe:
+            initialDelaySeconds: 10
+            timeoutSeconds: 20
+            failureThreshold: 5
+            periodSeconds: 60
+            exec:
+              command:
+                
+                  - sh
+                  - -c
+                  - |
+                    CONNECTION_CHECK_MAX_COUNT=0 AIRFLOW__LOGGING__LOGGING_LEVEL=ERROR exec /entrypoint \
+                    airflow jobs check --job-type SchedulerJob --hostname $(hostname)
+          resources:
+            {}
+          volumeMounts:
+            - name: config
+              mountPath: /opt/airflow/pod_templates/pod_template_file.yaml
+              subPath: pod_template_file.yaml
+              readOnly: true
+            - name: logs
+              mountPath: "/opt/airflow/logs"
+            - name: config
+              mountPath: "/opt/airflow/airflow.cfg"
+              subPath: airflow.cfg
+              readOnly: true
+            - name: config
+              mountPath: "/opt/airflow/config/airflow_local_settings.py"
+              subPath: airflow_local_settings.py
+              readOnly: true
+            - name: dags
+              mountPath: /opt/airflow/dags
+              
+              readOnly: True        
+        - name: git-sync
+          image: k8s.gcr.io/git-sync/git-sync:v3.4.0
+          imagePullPolicy: IfNotPresent
+          securityContext: 
+            runAsUser: 65533
+          env:
+            - name: GIT_SYNC_REV
+              value: "HEAD"
+            - name: GIT_SYNC_BRANCH
+              value: "v2-2-stable"
+            - name: GIT_SYNC_REPO
+              value: "https://github.com/apache/airflow.git"
+            - name: GIT_SYNC_DEPTH
+              value: "1"
+            - name: GIT_SYNC_ROOT
+              value: "/git"
+            - name: GIT_SYNC_DEST
+              value: "repo"
+            - name: GIT_SYNC_ADD_USER
+              value: "true"
+            - name: GIT_SYNC_WAIT
+              value: "60"
+            - name: GIT_SYNC_MAX_SYNC_FAILURES
+              value: "0"
+          resources: 
+              {}
+          volumeMounts:
+          - name: dags
+            mountPath: /git
+        - name: scheduler-log-groomer
+          resources:
+            {}
+          image: apache/airflow:2.3.3
+          imagePullPolicy: IfNotPresent
+          args: 
+            - bash
+            - /clean-logs
+          
+          env:
+            - name: AIRFLOW__LOG_RETENTION_DAYS
+              value: "15"
+          volumeMounts:
+            - name: logs
+              mountPath: "/opt/airflow/logs"
+      volumes:
+        - name: config
+          configMap:
+            name: airflow-airflow-config
+        - name: dags
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}

@@ -1,0 +1,88 @@
+################################
+## Airflow Run Migrations
+#################################
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-run-airflow-migrations
+  labels:
+    tier: airflow
+    component: run-airflow-migrations
+    release: airflow
+spec:
+  template:
+    metadata:
+      labels:
+        tier: airflow
+        component: run-airflow-migrations
+        release: airflow
+    spec:
+      securityContext: 
+        runAsUser: 50000
+        fsGroup: 0
+      restartPolicy: OnFailure
+      nodeSelector:
+        {}
+      affinity:
+        {}
+      tolerations:
+        []
+      topologySpreadConstraints:
+        []
+      serviceAccountName: airflow-migrate-database-job
+      containers:
+        - name: run-airflow-migrations
+          image: apache/airflow:2.3.3
+          imagePullPolicy: IfNotPresent
+          args: 
+            - bash
+            - -c
+            - |-
+              exec \
+              airflow db upgrade
+          envFrom:          
+            []
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"          
+            # Dynamically created environment variables
+            # Dynamically created secret envs
+            # Extra env          
+            # Hard Coded Airflow Envs
+            - name: AIRFLOW__CORE__FERNET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-fernet-key
+                  key: fernet-key
+            # For Airflow <2.3, backward compatibility; moved to [database] in 2.3
+            - name: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-metadata
+                  key: connection
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-metadata
+                  key: connection
+            - name: AIRFLOW_CONN_AIRFLOW_DB
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-airflow-metadata
+                  key: connection
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-webserver-secret-key
+                  key: webserver-secret-key
+          resources:
+            {}
+          volumeMounts:
+            - name: config
+              mountPath: "/opt/airflow/airflow.cfg"
+              subPath: airflow.cfg
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: airflow-airflow-config

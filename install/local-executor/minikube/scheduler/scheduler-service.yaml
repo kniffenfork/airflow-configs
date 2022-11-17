@@ -1,0 +1,24 @@
+---
+# Source: airflow/templates/scheduler/scheduler-service.yaml
+################################
+## Airflow Scheduler Service
+#################################
+kind: Service
+apiVersion: v1
+metadata:
+  name: airflow-scheduler
+  labels:
+    tier: airflow
+    component: scheduler
+    release: airflow
+spec:
+  clusterIP: None
+  selector:
+    tier: airflow
+    component: scheduler
+    release: airflow
+  ports:
+    - name: task-logs
+      protocol: TCP
+      port: 8793
+      targetPort: 8793
